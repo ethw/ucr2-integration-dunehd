@@ -98,7 +98,7 @@ async def on_unsubscribe_entities(entity_ids: list[str]) -> None:
     for entity_id in entity_ids:
         if entity_id in _configured_devices:
             device = _configured_devices[entity_id]
-            await device.disconnect()
+            device.disconnect()
             device.events.remove_all_listeners()
 
 
