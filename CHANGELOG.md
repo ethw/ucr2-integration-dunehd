@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Changes in the next release_
 
+### Fixed
+- Status polling could stop permanently, leaving the entity unavailable (and activities reporting the
+  device as unreachable) until the integration was reconfigured, while commands kept working.
+  `connect()` now replaces a finished polling task, a successful command revives polling,
+  a polling task that dies is logged, and each poll has an explicit timeout.
+- The command HTTP session is recreated after a failed command.
+- Unsubscribing entities no longer raises `TypeError` (`disconnect()` was awaited but is synchronous).
+
 ---
 
 ## v0.2.2 - 2025-12-20

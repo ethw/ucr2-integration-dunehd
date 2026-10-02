@@ -33,6 +33,9 @@ BACKOFF_MAX = 30
 BACKOFF_SEC = 2
 
 POLL_INTERVAL = 1
+# Upper bound for a single status poll. The aiohttp client timeout should already cover this,
+# but a poll that never returns would silently freeze the entity state, so guard it explicitly.
+POLL_TIMEOUT = 15
 
 EMPTY_IMAGE = (
     "data:image/png;base64,"
@@ -247,7 +250,14 @@ class DuneHDDevice:
                 return StatusCodes.NOT_IMPLEMENTED
         except Exception as e:  # pylint: disable=broad-except
             _LOG.error("Error for cmd %s: %s", cmd_id, e)
+            await self._reset_command_client()
             return StatusCodes.SERVER_ERROR
+
+        # The device answered a command, so it is reachable. If the status poller is not running
+        # (it died, or was never restarted), revive it so the entity leaves UNAVAILABLE.
+        if not self._is_polling():
+            _LOG.warning("[%s] Command succeeded but status polling was not running; restarting it", self.log_id)
+            self.connect()
 
         if status.command_status == dunehd.CommandStatus.FAILED:
             _LOG.error("Command status failed - %s: %s", status.error_kind, status.error_description)
@@ -329,7 +339,7 @@ class DuneHDDevice:
                 start = time.time()
 
                 try:
-                    status = await client.ui_state()
+                    status = await asyncio.wait_for(client.ui_state(), POLL_TIMEOUT)
                     attrs = self._attributes_for_status(status)
 
                     if self._connection_state == _ConnectionState.CONNECTING:
@@ -362,9 +372,37 @@ class DuneHDDevice:
 
                 await asyncio.sleep(delay)
 
+    def _is_polling(self) -> bool:
+        return self._connection_task is not None and not self._connection_task.done()
+
+    def _on_connection_task_done(self, task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            _LOG.error("[%s] Status polling stopped unexpectedly: %r", self.log_id, exc, exc_info=exc)
+        else:
+            _LOG.error("[%s] Status polling stopped unexpectedly", self.log_id)
+        if self._connection_task is task:
+            self._connection_task = None
+            self._connection_state = _ConnectionState.DISCONNECTED
+            self.events.emit(EVENTS.DISCONNECTED, self._device.identifier)
+
+    async def _reset_command_client(self) -> None:
+        """Replace the command HTTP session, so a broken pooled connection cannot persist."""
+        old = self._client
+        self._client = dunehd.Client(self._device.address, loop=self._loop)
+        try:
+            await old.close()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
     def connect(self) -> None:
-        if self._connection_task is None:
+        # Start polling unless a live task exists. A task that has finished (e.g. died on an
+        # unexpected exception) is replaced instead of blocking reconnects until reconfiguration.
+        if not self._is_polling():
             self._connection_task = self._loop.create_task(self._connection())
+            self._connection_task.add_done_callback(self._on_connection_task_done)
 
     def disconnect(self) -> None:
         if self._connection_task:
