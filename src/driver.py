@@ -106,7 +106,7 @@ async def on_device_connected(identifier: str, attributes: dict[str, Any]) -> No
     """Handle device connection."""
     _LOG.debug("Dune-HD device connected: %s", identifier)
 
-    on_device_update(identifier, attributes)
+    await on_device_update(identifier, attributes)
     await api.set_device_state(ucapi.DeviceStates.CONNECTED)
 
 
