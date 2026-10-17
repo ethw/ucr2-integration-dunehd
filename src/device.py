@@ -269,7 +269,10 @@ class DuneHDDevice:
 
         if status.player_state == dunehd.PlayerState.STANDBY:
             attributes[Attributes.STATE] = States.OFF
-        elif status.playback_is_buffering or status.playback_state == dunehd.PlaybackState.INITIALIZING:
+        elif status.playback_is_buffering or status.playback_state in (
+            dunehd.PlaybackState.INITIALIZING,
+            dunehd.PlaybackState.BUFFERING,
+        ):
             attributes[Attributes.STATE] = States.BUFFERING
         elif status.playback_state == dunehd.PlaybackState.PLAYING:
             attributes[Attributes.STATE] = States.PLAYING
