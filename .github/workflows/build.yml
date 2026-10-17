@@ -47,8 +47,8 @@ jobs:
         if: contains(github.ref, 'tags/v')
         run: |
           DRIVER_VERSION="v$(jq .version -r driver.json)"
-          if [ "${{ env.VERSION }}" != "$DRIVER_VERSION" ]; then
-            echo "Version in driver.json ($DRIVER_VERSION) doesn't match git version tag (${{ env.VERSION }})!"
+          if [ "${GITHUB_REF_NAME}" != "$DRIVER_VERSION" ]; then
+            echo "Version in driver.json ($DRIVER_VERSION) doesn't match git version tag (${GITHUB_REF_NAME})!"
             exit 1
           fi
 

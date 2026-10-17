@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Changes in the next release_
 
+### Fixed
+- The release build's "Verify driver.json version" step compared `driver.json` with itself (`VERSION` is
+  read from `driver.json` one step earlier), so a tag that didn't match `driver.json` was released anyway.
+  It now compares against the tag name.
+
 ---
 
 ## v0.2.2 - 2025-12-20
