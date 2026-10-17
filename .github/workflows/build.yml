@@ -119,6 +119,8 @@ jobs:
 
   docker:
     name: Build and push Docker image
+    # Fork: needs the upstream author's Docker Hub secrets, so only run upstream.
+    if: github.repository_owner == 'petercv'
     runs-on: ubuntu-latest
     environment: Ubuntu
     needs: [build]
@@ -160,7 +162,9 @@ jobs:
 
   release:
     name: Create GitHub release
-    if: github.ref == 'refs/heads/main' || contains(github.ref, 'tags/v')
+    # Fork: releases from version tags only. The "latest" development pre-release on main
+    # moves the `latest` tag, which the Gitea push mirror would keep moving back.
+    if: contains(github.ref, 'tags/v') || (github.repository_owner == 'petercv' && github.ref == 'refs/heads/main')
     # using ubuntu-24.04: Package 'qemu' has no installation candidate
     runs-on: ubuntu-22.04
     needs: [build]
