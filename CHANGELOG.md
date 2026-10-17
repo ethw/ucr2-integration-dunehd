@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Changes in the next release_
 
+### Added
+- Simple command `CURSOR_ENTER_LONG`: long press OK on Android-based players. IP Control can only
+  emulate a short press, so this goes over ADB (port 5555): a persistent virtual HID remote on the player
+  (`/dev/uhid`) holds Menu Pick for 0.45 s. About 0.5 s per press over a kept ADB connection. Map it to
+  the OK button's long press in an activity. The ADB key is created in the configuration directory; a
+  player with ADB authorisation on asks once to allow it.
+
 ### Fixed
 - Every command failed with an error ("Internal Server Error" on the remote) and status polling
   dropped while the Dune reported `playback_state` or `previous_playback_state` `buffering`, which

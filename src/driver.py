@@ -151,7 +151,7 @@ def _configure_new_device(device: config.DuneHDDeviceConfig, connect: bool = Tru
             device.identifier,
             device.address if device.address else "",
         )
-        device = DuneHDDevice(device, loop=_LOOP)
+        device = DuneHDDevice(device, loop=_LOOP, data_path=api.config_dir_path)
         device.events.on(EVENTS.CONNECTED, on_device_connected)
         device.events.on(EVENTS.DISCONNECTED, on_device_disconnected)
         device.events.on(EVENTS.ERROR, on_device_connection_error)
