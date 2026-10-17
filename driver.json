@@ -1,6 +1,6 @@
 {
   "driver_id": "ucr2_dunehd_driver",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "min_core_api": "0.7.1",
   "name": { "en": "Dune-HD" },
   "icon": "uc:integration",
