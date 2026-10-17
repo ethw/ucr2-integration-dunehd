@@ -173,7 +173,7 @@ class Status(BaseModel):
     serial_number: str
     commercial_serial_number: str
     firmware_version: str
-    ui_state: Optional[UIState] = (None,)
+    ui_state: Optional[UIState] = None
     raw: dict[str, Any] = None
 
 

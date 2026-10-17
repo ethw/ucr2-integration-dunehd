@@ -289,7 +289,12 @@ class DuneHDDevice:
 
         if status.playback_state is not None and status.playback_picture is not None:
             attributes[media_player.Attributes.MEDIA_IMAGE_URL] = self._client.get_file_url(status.playback_picture)
-        elif status.playback_state is not None and status.ui_state.screen.bg_url is not None:
+        elif (
+            status.playback_state is not None
+            and status.ui_state is not None
+            and status.ui_state.screen is not None
+            and status.ui_state.screen.bg_url is not None
+        ):
             attributes[media_player.Attributes.MEDIA_IMAGE_URL] = self._client.get_file_url(
                 status.ui_state.screen.bg_url
             )
