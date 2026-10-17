@@ -3,3 +3,4 @@ pyee==13.0.0
 ucapi==0.3.2
 aiohttp==3.13.2
 pydantic
+adb-shell[async]==0.4.4

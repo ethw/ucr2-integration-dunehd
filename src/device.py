@@ -17,6 +17,7 @@ from ucapi import MediaPlayer, StatusCodes, media_player
 from ucapi.media_player import Attributes, Commands, States
 
 import dunehd
+from adb_longpress import AdbLongPress
 from config import DuneHDDeviceConfig
 
 
@@ -25,6 +26,7 @@ class SimpleCommands(str, Enum):
 
     BLACK_SCREEN = "BLACK_SCREEN"
     MAIN_SCREEN = "MAIN_SCREEN"
+    CURSOR_ENTER_LONG = "CURSOR_ENTER_LONG"
 
 
 _LOG = logging.getLogger(__name__)
@@ -91,7 +93,9 @@ class _ConnectionState(IntEnum):
 class DuneHDDevice:
     """Represents a Dune-HD device."""
 
-    def __init__(self, device: DuneHDDeviceConfig, loop: AbstractEventLoop | None = None) -> None:
+    def __init__(
+        self, device: DuneHDDeviceConfig, loop: AbstractEventLoop | None = None, data_path: str | None = None
+    ) -> None:
         """Create instance."""
         self._loop: AbstractEventLoop = loop or asyncio.get_running_loop()
         self.events = AsyncIOEventEmitter(self._loop)
@@ -109,6 +113,7 @@ class DuneHDDevice:
         }
         self._media_player = self._create_media_player()
         self._client = dunehd.Client(device.address)
+        self._adb = AdbLongPress(device.address, data_path or ".")
         self._connection_task: asyncio.Task | None = None
         self._connection_state: _ConnectionState = _ConnectionState.DISCONNECTED
 
@@ -243,6 +248,10 @@ class DuneHDDevice:
                 status = await self._client.send_command(dunehd.Command.BLACK_SCREEN)
             elif cmd_id == SimpleCommands.MAIN_SCREEN:
                 status = await self._client.send_command(dunehd.Command.MAIN_SCREEN)
+            elif cmd_id == SimpleCommands.CURSOR_ENTER_LONG:
+                # Not possible over IP Control (no key hold); goes over ADB. See adb_longpress.py.
+                await self._adb.long_press_ok()
+                return StatusCodes.OK
             else:
                 return StatusCodes.NOT_IMPLEMENTED
         except Exception as e:  # pylint: disable=broad-except
