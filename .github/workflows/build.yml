@@ -218,11 +218,37 @@ jobs:
         run: |
           for filename in *.tar.gz; do echo "sha256 `sha256sum $filename`" >> ${{ env.HASH_FILENAME }}; done;
 
+      # Fork: release notes are the tag's CHANGELOG.md section, not an automatic commit list
+      # (which shows merge commits and branch names, not what changed).
+      - name: Checkout CHANGELOG.md
+        if: "contains(github.ref, 'tags/v')"
+        uses: actions/checkout@v4
+        with:
+          path: src
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
+      - name: Release notes from CHANGELOG.md
+        if: "contains(github.ref, 'tags/v')"
+        run: |
+          # Section from "## <tag>" up to the next "## " heading or "---" rule.
+          awk -v tag="${GITHUB_REF_NAME}" '
+            $0 ~ "^## " tag "( |$)" { on = 1; next }
+            on && (/^## / || /^---/) { exit }
+            on { print }
+          ' src/CHANGELOG.md | sed -e '/./,$!d' > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md)." > release-notes.md
+          fi
+          printf '\n---\nOn-device archive: `uc-intg-dunehd-%s-aarch64.tar.gz`. Differences from upstream: see the README.\n' "${GITHUB_REF_NAME}" >> release-notes.md
+          cat release-notes.md
+
       - name: Create Release
-        uses: "marvinpinto/action-automatic-releases@latest"
+        uses: softprops/action-gh-release@v2
         if: "contains(github.ref, 'tags/v')"
         with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
           prerelease: false
           files: |
             *.tar.gz
