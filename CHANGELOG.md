@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Changes in the next release_
 
+### Fixed (0.3.1)
+- Fast-forward and rewind were advertised but returned "not implemented".
+- A status without `ui_state` during playback raised `AttributeError` (tuple default) and dropped the connection.
+- The media title no longer shows a stream URL's query string, which can hold credentials.
+- Default log level is INFO (was DEBUG); `UC_LOG_LEVEL=DEBUG` still works.
+
 ### Added
 - Simple command `CURSOR_ENTER_LONG`: long press OK on Android-based players. IP Control can only
   emulate a short press, so this goes over ADB (port 5555): a persistent virtual HID remote on the player
