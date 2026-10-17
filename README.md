@@ -1,5 +1,28 @@
 # Dune-HD integration for Remote Two / 3
 
+> **This is a fork** of [petercv/ucr2-integration-dunehd](https://github.com/petercv/ucr2-integration-dunehd)
+> with fixes and one feature that are not (yet) upstream. It runs on a Remote 3 in daily use.
+> Issues are welcome and may be looked at, but **this fork comes with no guarantee of support**.
+> For anything not listed below, the upstream project is the reference.
+
+## What is different from upstream
+
+Each change lives on its own branch off upstream `main`, so it can be reviewed or
+submitted upstream on its own. `main` here combines all of them.
+
+| Change | Branch | Why |
+|---|---|---|
+| **Buffering state no longer breaks the driver** | `fix/buffering-state` | The Dune reports `playback_state` / `previous_playback_state` `buffering` after starting or seeking a network stream. Upstream's enum lacks it, so every status reply failed validation: every button press returned an error ("Internal Server Error" on the remote) and the entity dropped until the next state change. Unknown states now parse as `unknown`. Probably the cause of upstream #4 (connection drops when scrubbing). |
+| **Status polling recovers** | `fix/polling-recovery` | Polling could stop for good, leaving the entity unavailable until the integration was reconfigured. A finished polling task is replaced, a successful command revives polling, and each poll has a timeout. |
+| **Reconnect state** | `fix/reconnect-state` | `on_device_update` was not awaited on (re)connect and the synchronous `disconnect()` was awaited, raising `TypeError` on unsubscribe. |
+| **Long press OK** (new simple command `CURSOR_ENTER_LONG`) | `feature/adb-long-press` | Upstream #5. Android detects a long press by how long the key is held, and IP Control's `ir_code` only sends a complete short press, so this uses ADB (port 5555, ADB over network enabled on the player): a persistent virtual HID remote on the player holds OK for 0.45 s. About 0.5 s per press. Map it to the OK button's long press in an activity. The ADB key is created in the integration's configuration directory; a player with ADB authorisation on asks once to allow it. |
+
+Versions here continue from upstream's (0.3.x) so the remote accepts them as updates
+(`POST /api/intg/install?update=true`). Build steps are upstream's, see below.
+
+---
+
+
 Using [uc-integration-api](https://github.com/aitatoi/integration-python-library)
 
 The driver lets you enter the IP address of a Dune-HD device and exposes a
