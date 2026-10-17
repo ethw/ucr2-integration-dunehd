@@ -1,0 +1,40 @@
+# Every commit of this fork is public on GitHub (push mirror), so each one must be authored and
+# committed as ethw (GitHub noreply address) and carry a "Co-Authored-By: Claude" trailer.
+# Commits that came from upstream (reachable from the `upstream` branch) are exempt.
+# Merges are fast-forward only, so what passes here is exactly what gets published.
+name: Public commit identity
+
+on:
+  pull_request:
+  push:
+    branches: ["**"]
+
+jobs:
+  identity:
+    runs-on: [docker]
+    container: ghcr.io/catthehacker/ubuntu:act-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check author, committer and co-author trailer
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          EMAIL=9457378+ethw@users.noreply.github.com
+          git fetch -q origin '+refs/heads/upstream:refs/remotes/origin/upstream'
+          if [ -n "$PR_HEAD" ]; then range="$PR_BASE..$PR_HEAD"; else range="HEAD"; fi
+          bad=0
+          for c in $(git rev-list "$range" --not refs/remotes/origin/upstream); do
+            who=$(git log -1 --format='%an <%ae> / %cn <%ce>' "$c")
+            if [ "$who" != "ethw <$EMAIL> / ethw <$EMAIL>" ]; then
+              echo "::error::$c is '$who'; public commits must be ethw <$EMAIL> as author and committer"; bad=1
+            fi
+            if ! git log -1 --format=%B "$c" | grep -q '^Co-Authored-By: Claude'; then
+              echo "::error::$c has no 'Co-Authored-By: Claude' trailer"; bad=1
+            fi
+          done
+          [ "$bad" = 0 ] && echo "All fork commits in $range are ethw with a Claude co-author trailer."
+          exit "$bad"
