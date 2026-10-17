@@ -7,6 +7,7 @@ Represents a device / media player entity of the integration driver.
 
 import asyncio
 import logging
+import re
 import time
 from asyncio import AbstractEventLoop
 from enum import Enum, IntEnum
@@ -18,6 +19,14 @@ from ucapi.media_player import Attributes, Commands, States
 
 import dunehd
 from config import DuneHDDeviceConfig
+
+
+def _display_caption(caption: str | None) -> str:
+    """Caption for the remote's screen. For a stream started by URL the Dune shows the URL itself,
+    query string included, which can carry credentials (e.g. ``?api_key=``); drop the query."""
+    if not caption:
+        return ""
+    return re.sub(r"(://[^\s?]*)\?\S*", r"\1", caption)
 
 
 class SimpleCommands(str, Enum):
@@ -285,7 +294,7 @@ class DuneHDDevice:
         )
         attributes[media_player.Attributes.MEDIA_DURATION] = status.playback_duration if status.playback_duration else 0
         attributes[media_player.Attributes.MEDIA_POSITION] = status.playback_position if status.playback_position else 0
-        attributes[media_player.Attributes.MEDIA_TITLE] = status.playback_caption if status.playback_caption else ""
+        attributes[media_player.Attributes.MEDIA_TITLE] = _display_caption(status.playback_caption)
 
         if status.playback_state is not None and status.playback_picture is not None:
             attributes[media_player.Attributes.MEDIA_IMAGE_URL] = self._client.get_file_url(status.playback_picture)
