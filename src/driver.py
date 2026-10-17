@@ -206,7 +206,7 @@ async def main():
     """Start the Remote Two integration driver."""
     logging.basicConfig()
 
-    level = os.getenv("UC_LOG_LEVEL", "DEBUG").upper()
+    level = os.getenv("UC_LOG_LEVEL", "INFO").upper()
     logging.getLogger("config").setLevel(level)
     logging.getLogger("driver").setLevel(level)
     logging.getLogger("device").setLevel(level)
