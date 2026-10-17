@@ -167,6 +167,10 @@ class DuneHDDevice:
                 status = await self._client.toggle_play_pause()
             elif cmd_id == Commands.STOP:
                 status = await self._client.stop()
+            elif cmd_id == Commands.FAST_FORWARD:
+                status = await self._client.fast_forward()
+            elif cmd_id == Commands.REWIND:
+                status = await self._client.rewind()
             elif cmd_id == Commands.NEXT:
                 status = await self._client.next()
             elif cmd_id == Commands.PREVIOUS:
