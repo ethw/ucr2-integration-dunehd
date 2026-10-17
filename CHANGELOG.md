@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 _Changes in the next release_
 
 ### Fixed
+- Every command failed with an error ("Internal Server Error" on the remote) and status polling
+  dropped while the Dune reported `playback_state` or `previous_playback_state` `buffering`, which
+  happens after starting or seeking a network stream until the next state change. Unknown player and
+  playback states now parse as `unknown`, `buffering` is known and maps to the buffering state, and
+  `playback_speed` accepts any integer.
 - Status polling could stop permanently, leaving the entity unavailable (and activities reporting the
   device as unreachable) until the integration was reconfigured, while commands kept working.
   `connect()` now replaces a finished polling task, a successful command revives polling,

@@ -28,6 +28,12 @@ class PlayerState(Enum):
     BLACK_SCREEN = "black_screen"
     STANDBY = "standby"
     OSD_SCREEN = "osd_screen"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def _missing_(cls, value):
+        # A state this client doesn't know must not make the whole status unparsable.
+        return cls.UNKNOWN
 
 
 class PlaybackState(Enum):
@@ -37,6 +43,14 @@ class PlaybackState(Enum):
     SEEKING = "seeking"
     DEINITIALIZING = "deinitializing"
     STOPPED = "stopped"
+    BUFFERING = "buffering"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def _missing_(cls, value):
+        # The Dune reports states not listed here (e.g. "buffering" before 0.2.5); an unknown
+        # value used to fail validation of every status, so every command returned an error.
+        return cls.UNKNOWN
 
 
 class PlaybackSpeed(IntEnum):
@@ -158,7 +172,7 @@ class Status(BaseModel):
     playback_url: Optional[str] = None
     playback_state: Optional[PlaybackState] = None
     previous_playback_state: Optional[PlaybackState] = None
-    playback_speed: Optional[PlaybackSpeed] = None
+    playback_speed: Optional[int] = None  # PlaybackSpeed values; plain int so odd speeds still parse
     playback_duration: Optional[int] = None
     playback_position: Optional[int] = None
     playback_is_buffering: Optional[bool] = None
