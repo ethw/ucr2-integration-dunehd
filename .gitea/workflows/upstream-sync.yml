@@ -59,8 +59,9 @@ jobs:
   # but its own, hooks off and ssh -F /dev/null, so ~/.gitconfig and ~/.ssh/config are ignored.
   # A fresh bare repo rebuilds the merge from main, upstream's commit and the original's main,
   # all fetched from their servers, and pushes only if its tree is the one the checks passed.
-  # The key is written after every fetch. Not covered: a process the checks left running as the
-  # runner user on this host-mode runner could still read the key file while the push runs.
+  # The key is written after every fetch. Not covered: the checks run as a runner user with
+  # Docker (root on CT 233), so they can change the host this job runs on, including the git and
+  # ssh binaries it uses.
   push:
     needs: sync
     if: needs.sync.outputs.merge_tree != ''
