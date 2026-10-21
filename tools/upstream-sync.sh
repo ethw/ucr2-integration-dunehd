@@ -7,8 +7,8 @@
 #   3. merge it into a copy of main; a conflict fails the run
 #   4. run CHECK_CMD (tests and the device build) on the merge
 #   5. green: push the original to `upstream` and the merge to `main` (a fast-forward), both or
-#      neither. With SYNC_PUSH=0 the push is left to the caller: the commits to push are written
-#      to $SYNC_STATE (UPSTREAM_SHA=..., MERGE_SHA=...), so the workflow can set up its deploy
+#      neither. With SYNC_PUSH=0 the push is left to the caller: what to push is written
+#      to $SYNC_STATE (UPSTREAM_SHA=..., MERGE_TREE=...), so the workflow can set up its deploy
 #      key only after the checks, which run upstream's code.
 # Any failure leaves main alone; the workflow then opens an issue.
 #
@@ -67,7 +67,7 @@ echo "running checks: $CHECK_CMD"
 bash -c "$CHECK_CMD"
 
 if [ "${SYNC_PUSH:-1}" = 0 ]; then
-  printf 'UPSTREAM_SHA=%s\nMERGE_SHA=%s\n' "$new" "$(git rev-parse HEAD)" > "${SYNC_STATE:?}"
+  printf 'UPSTREAM_SHA=%s\nMERGE_TREE=%s\n' "$new" "$(git rev-parse "HEAD^{tree}")" > "${SYNC_STATE:?}"
   echo "checks passed; push left to the caller"
   exit 0
 fi

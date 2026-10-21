@@ -15,6 +15,11 @@ concurrency:
 jobs:
   sync:
     runs-on: [docker]
+    env:
+      # public through the GitHub push mirror: ethw with a Claude trailer, like every
+      # fork commit (Public commit identity check)
+      GIT_NAME: ethw
+      GIT_EMAIL: 9457378+ethw@users.noreply.github.com
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,10 +30,6 @@ jobs:
         env:
           UPSTREAM_URL: https://github.com/petercv/ucr2-integration-dunehd.git
           CHECK_CMD: tools/ci-check.sh
-          # public through the GitHub push mirror: ethw with a Claude trailer, like every
-          # fork commit (Public commit identity check)
-          GIT_NAME: ethw
-          GIT_EMAIL: 9457378+ethw@users.noreply.github.com
           COMMIT_TRAILER: 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
           # no upstream tags: fork versions continue upstream's numbering and could collide,
           # and a tag on an upstream commit would run only its .github workflows
@@ -37,24 +38,55 @@ jobs:
           SYNC_STATE: ${{ runner.temp }}/sync-state
         run: tools/upstream-sync.sh
 
-      # The key only exists after the checks, which run upstream's (untrusted) code.
-      - name: Push access with the deploy key
+      # The checks ran upstream's (untrusted) code with the workspace mounted, so nothing the
+      # push uses comes from it: not its .git (hooks, config), not its objects. A fresh bare repo
+      # rebuilds the merge from main, upstream's commit and the original's main, all fetched from
+      # their servers, and pushes only if its tree is the one the checks passed. The key is
+      # written after every fetch; the push runs with hooks off.
+      - name: Push upstream and main (both or neither)
         env:
           KEY: ${{ secrets.SYNC_DEPLOY_KEY }}
-        run: |
-          dir="$RUNNER_TEMP/ssh"; mkdir -p "$dir"; chmod 700 "$dir"
-          printf '%s\n' "$KEY" > "$dir/key"; chmod 600 "$dir/key"
-          host=$(echo "$GITHUB_SERVER_URL" | sed 's|^https\?://||; s|/.*||')
-          git remote set-url origin "git@$host:${GITHUB_REPOSITORY}.git"
-          git config core.sshCommand "ssh -i $dir/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$dir/known_hosts"
-
-      - name: Push upstream and main (both or neither)
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_URL: https://github.com/petercv/ucr2-integration-dunehd.git
+          COMMIT_TRAILER: 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
         run: |
           state="$RUNNER_TEMP/sync-state"
           [ -f "$state" ] || { echo "nothing to push"; exit 0; }
-          . "$state"
-          git push --atomic origin "$UPSTREAM_SHA:refs/heads/upstream" "$MERGE_SHA:refs/heads/main"
-          echo "main updated to $MERGE_SHA"
+          up=$(sed -n 's/^UPSTREAM_SHA=\([0-9a-f]\{40\}\)$/\1/p' "$state")
+          tested=$(sed -n 's/^MERGE_TREE=\([0-9a-f]\{40\}\)$/\1/p' "$state")
+          [ -n "$up" ] && [ -n "$tested" ] || { echo "::error::malformed $state"; exit 1; }
+
+          export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+          repo="$RUNNER_TEMP/push.git"; rm -rf "$repo"; git init --quiet --bare "$repo"
+          g() { git -C "$repo" -c core.hooksPath=/dev/null "$@"; }
+          g -c http.extraHeader="Authorization: token $TOKEN" fetch --quiet --no-tags \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" main:refs/fork/main upstream:refs/fork/upstream
+          g fetch --quiet --no-tags "$UPSTREAM_URL" main:refs/original/main
+          g merge-base --is-ancestor refs/fork/upstream "$up" &&
+            g merge-base --is-ancestor "$up" refs/original/main ||
+            { echo "::error::$up is not between upstream and the original's main"; exit 1; }
+          tree=$(g merge-tree --write-tree refs/fork/main "$up") ||
+            { echo "::error::main and upstream no longer merge cleanly"; exit 1; }
+          [ "$tree" = "$tested" ] ||
+            { echo "::error::rebuilt merge $tree is not the tested $tested (main moved?)"; exit 1; }
+          msg="Merge upstream $(g rev-parse --short "$up") into main
+
+          Automatic upstream sync: $(g rev-list --count "refs/fork/upstream..$up") new commit(s) from $UPSTREAM_URL"
+          [ -z "${COMMIT_TRAILER:-}" ] || msg="$msg
+
+          $COMMIT_TRAILER"
+          merge=$(printf '%s\n' "$msg" |
+            GIT_AUTHOR_NAME="$GIT_NAME" GIT_AUTHOR_EMAIL="$GIT_EMAIL" \
+            GIT_COMMITTER_NAME="$GIT_NAME" GIT_COMMITTER_EMAIL="$GIT_EMAIL" \
+            g commit-tree "$tree" -p refs/fork/main -p "$up")
+
+          dir="$RUNNER_TEMP/ssh"; mkdir -p "$dir"; chmod 700 "$dir"
+          printf '%s\n' "$KEY" > "$dir/key"; chmod 600 "$dir/key"
+          host=$(echo "$GITHUB_SERVER_URL" | sed 's|^https\?://||; s|/.*||')
+          g -c core.sshCommand="ssh -i $dir/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$dir/known_hosts" \
+            push --no-verify --atomic "git@$host:$GITHUB_REPOSITORY.git" \
+            "$up:refs/heads/upstream" "$merge:refs/heads/main"
+          echo "main updated to $merge"
 
       - name: Remove the key
         if: always()
