@@ -15,6 +15,9 @@ concurrency:
 jobs:
   sync:
     runs-on: [docker]
+    outputs:
+      upstream_sha: ${{ steps.state.outputs.upstream_sha }}
+      merge_tree: ${{ steps.state.outputs.merge_tree }}
     env:
       # public through the GitHub push mirror: ethw with a Claude trailer, like every
       # fork commit (Public commit identity check)
@@ -38,62 +41,95 @@ jobs:
           SYNC_STATE: ${{ runner.temp }}/sync-state
         run: tools/upstream-sync.sh
 
-      # The checks ran upstream's (untrusted) code with the workspace mounted, so nothing the
-      # push uses comes from it: not its .git (hooks, config), not its objects. A fresh bare repo
-      # rebuilds the merge from main, upstream's commit and the original's main, all fetched from
-      # their servers, and pushes only if its tree is the one the checks passed. The key is
-      # written after every fetch; the push runs with hooks off.
+      - name: Hand the tested merge to the push job
+        id: state
+        env:
+          SYNC_STATE: ${{ runner.temp }}/sync-state
+        run: |
+          [ -f "$SYNC_STATE" ] || { echo "nothing to push"; exit 0; }
+          up=$(sed -n 's/^UPSTREAM_SHA=\([0-9a-f]\{40\}\)$/\1/p' "$SYNC_STATE")
+          tree=$(sed -n 's/^MERGE_TREE=\([0-9a-f]\{40\}\)$/\1/p' "$SYNC_STATE")
+          [ -n "$up" ] && [ -n "$tree" ] || { echo "::error::malformed $SYNC_STATE"; exit 1; }
+          echo "upstream_sha=$up" >> "$GITHUB_OUTPUT"
+          echo "merge_tree=$tree" >> "$GITHUB_OUTPUT"
+
+  # The checks ran upstream's (untrusted) code, so the push is its own job: a fresh environment
+  # (nothing the checks wrote to GITHUB_ENV or GITHUB_PATH), no checkout, and only two 40-hex
+  # values from the sync job. It runs under `env -i` with PATH=/usr/bin:/bin, no git config
+  # but its own, hooks off and ssh -F /dev/null, so ~/.gitconfig and ~/.ssh/config are ignored.
+  # A fresh bare repo rebuilds the merge from main, upstream's commit and the original's main,
+  # all fetched from their servers, and pushes only if its tree is the one the checks passed.
+  # The key is written after every fetch. Not covered: a process the checks left running as the
+  # runner user on this host-mode runner could still read the key file while the push runs.
+  push:
+    needs: sync
+    if: needs.sync.outputs.merge_tree != ''
+    runs-on: [docker]
+    env:
+      # public through the GitHub push mirror: ethw with a Claude trailer, like every
+      # fork commit (Public commit identity check)
+      GIT_NAME: ethw
+      GIT_EMAIL: 9457378+ethw@users.noreply.github.com
+    steps:
       - name: Push upstream and main (both or neither)
         env:
           KEY: ${{ secrets.SYNC_DEPLOY_KEY }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UP: ${{ needs.sync.outputs.upstream_sha }}
+          TESTED: ${{ needs.sync.outputs.merge_tree }}
           UPSTREAM_URL: https://github.com/petercv/ucr2-integration-dunehd.git
           COMMIT_TRAILER: 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
         run: |
-          state="$RUNNER_TEMP/sync-state"
-          [ -f "$state" ] || { echo "nothing to push"; exit 0; }
-          up=$(sed -n 's/^UPSTREAM_SHA=\([0-9a-f]\{40\}\)$/\1/p' "$state")
-          tested=$(sed -n 's/^MERGE_TREE=\([0-9a-f]\{40\}\)$/\1/p' "$state")
-          [ -n "$up" ] && [ -n "$tested" ] || { echo "::error::malformed $state"; exit 1; }
-
-          export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
-          repo="$RUNNER_TEMP/push.git"; rm -rf "$repo"; git init --quiet --bare "$repo"
+          exec env -i PATH=/usr/bin:/bin LANG=C.UTF-8 HOME=/nonexistent \
+            GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+            KEY="$KEY" TOKEN="$TOKEN" UP="$UP" TESTED="$TESTED" UPSTREAM_URL="$UPSTREAM_URL" \
+            COMMIT_TRAILER="$COMMIT_TRAILER" GIT_NAME="$GIT_NAME" GIT_EMAIL="$GIT_EMAIL" \
+            SERVER="$GITHUB_SERVER_URL" REPO="$GITHUB_REPOSITORY" TMP="$RUNNER_TEMP" \
+            /bin/bash --noprofile --norc -euo pipefail -c '
+          printf "%s\n" "$UP" "$TESTED" | grep -qvxE "[0-9a-f]{40}" &&
+            { echo "::error::malformed sync outputs"; exit 1; }
+          repo="$TMP/push.git"; rm -rf "$repo"; git init --quiet --bare "$repo"
           g() { git -C "$repo" -c core.hooksPath=/dev/null "$@"; }
           g -c http.extraHeader="Authorization: token $TOKEN" fetch --quiet --no-tags \
-            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" main:refs/fork/main upstream:refs/fork/upstream
+            "$SERVER/$REPO.git" main:refs/fork/main upstream:refs/fork/upstream
           g fetch --quiet --no-tags "$UPSTREAM_URL" main:refs/original/main
-          g merge-base --is-ancestor refs/fork/upstream "$up" &&
-            g merge-base --is-ancestor "$up" refs/original/main ||
-            { echo "::error::$up is not between upstream and the original's main"; exit 1; }
-          tree=$(g merge-tree --write-tree refs/fork/main "$up") ||
+          g merge-base --is-ancestor refs/fork/upstream "$UP" &&
+            g merge-base --is-ancestor "$UP" refs/original/main ||
+            { echo "::error::$UP is not between upstream and the original main"; exit 1; }
+          tree=$(g merge-tree --write-tree refs/fork/main "$UP") ||
             { echo "::error::main and upstream no longer merge cleanly"; exit 1; }
-          [ "$tree" = "$tested" ] ||
-            { echo "::error::rebuilt merge $tree is not the tested $tested (main moved?)"; exit 1; }
-          msg="Merge upstream $(g rev-parse --short "$up") into main
+          [ "$tree" = "$TESTED" ] ||
+            { echo "::error::rebuilt merge $tree is not the tested $TESTED (main moved?)"; exit 1; }
+          msg="Merge upstream $(g rev-parse --short "$UP") into main
 
-          Automatic upstream sync: $(g rev-list --count "refs/fork/upstream..$up") new commit(s) from $UPSTREAM_URL"
-          [ -z "${COMMIT_TRAILER:-}" ] || msg="$msg
+          Automatic upstream sync: $(g rev-list --count "refs/fork/upstream..$UP") new commit(s) from $UPSTREAM_URL"
+          [ -z "$COMMIT_TRAILER" ] || msg="$msg
 
           $COMMIT_TRAILER"
-          merge=$(printf '%s\n' "$msg" |
+          merge=$(printf "%s\n" "$msg" |
             GIT_AUTHOR_NAME="$GIT_NAME" GIT_AUTHOR_EMAIL="$GIT_EMAIL" \
             GIT_COMMITTER_NAME="$GIT_NAME" GIT_COMMITTER_EMAIL="$GIT_EMAIL" \
-            g commit-tree "$tree" -p refs/fork/main -p "$up")
+            g commit-tree "$tree" -p refs/fork/main -p "$UP")
 
-          dir="$RUNNER_TEMP/ssh"; mkdir -p "$dir"; chmod 700 "$dir"
-          printf '%s\n' "$KEY" > "$dir/key"; chmod 600 "$dir/key"
-          host=$(echo "$GITHUB_SERVER_URL" | sed 's|^https\?://||; s|/.*||')
-          g -c core.sshCommand="ssh -i $dir/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$dir/known_hosts" \
-            push --no-verify --atomic "git@$host:$GITHUB_REPOSITORY.git" \
-            "$up:refs/heads/upstream" "$merge:refs/heads/main"
-          echo "main updated to $merge"
+          dir="$TMP/ssh"; rm -rf "$dir"; mkdir -m 700 "$dir"
+          trap "rm -rf \"$dir\"" EXIT
+          printf "%s\n" "$KEY" > "$dir/key"; chmod 600 "$dir/key"
+          host=${SERVER#*://}; host=${host%%/*}
+          g -c core.sshCommand="ssh -F /dev/null -i $dir/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$dir/known_hosts" \
+            push --no-verify --atomic "git@$host:$REPO.git" \
+            "$UP:refs/heads/upstream" "$merge:refs/heads/main"
+          echo "main updated to $merge"'
 
       - name: Remove the key
         if: always()
         run: rm -rf "$RUNNER_TEMP/ssh"
 
-      - name: Open an issue on failure
-        if: failure()
+  report:
+    needs: [sync, push]
+    if: always() && (needs.sync.result == 'failure' || needs.push.result == 'failure')
+    runs-on: [docker]
+    steps:
+      - name: Open an issue
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
