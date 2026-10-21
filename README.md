@@ -27,6 +27,12 @@ Versions here continue from upstream's (0.3.x) so the remote accepts them as upd
 arm64 machine or Docker binfmt, `tools/build-aarch64-proot.sh` builds the on-device archive
 under proot + qemu-user.
 
+Fork tooling on `main` only (not meant for upstream): a Gitea Actions build
+(`.gitea/workflows/build.yml`, `tools/ci-check.sh`: upstream's lint, the aarch64 build, and a
+check that every system library of an official release is bundled) and a weekly upstream sync
+(`.gitea/workflows/upstream-sync.yml`, `tools/upstream-sync.sh`) that merges upstream `main`
+automatically when it merges cleanly and every check passes, and opens an issue otherwise.
+
 ---
 
 

@@ -1,0 +1,33 @@
+# Fork: Gitea Actions build of the on-device (aarch64) archive with the checks of
+# tools/ci-check.sh. Public releases still come from .github/workflows/build.yml on GitHub
+# for a v* tag; the Gitea release (the archive actually installed) is made at install time.
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: [docker]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint, aarch64 build, bundled library check
+        run: tools/ci-check.sh
+
+      - name: Archive name
+        run: echo "ARCHIVE=$(ls uc-intg-dunehd-v*-aarch64.tar.gz)" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: ${{ env.ARCHIVE }}
+          retention-days: 30

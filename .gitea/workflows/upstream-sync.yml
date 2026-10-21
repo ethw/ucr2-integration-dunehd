@@ -1,0 +1,81 @@
+# Fork: weekly automatic merge of petercv/ucr2-integration-dunehd main.
+# Ethan, 2026-10-21: auto-merge when it merges cleanly and every check passes; otherwise an
+# issue is opened and main is left alone. Pushes with the repo's write deploy key (secret
+# SYNC_DEPLOY_KEY), the only non-`me` key allowed to push the protected main.
+name: Upstream sync
+
+on:
+  schedule:
+    - cron: '23 9 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: upstream-sync
+
+jobs:
+  sync:
+    runs-on: [docker]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Push access with the deploy key
+        env:
+          KEY: ${{ secrets.SYNC_DEPLOY_KEY }}
+        run: |
+          dir="$RUNNER_TEMP/ssh"; mkdir -p "$dir"; chmod 700 "$dir"
+          printf '%s\n' "$KEY" > "$dir/key"; chmod 600 "$dir/key"
+          host=$(echo "$GITHUB_SERVER_URL" | sed 's|^https\?://||; s|/.*||')
+          git remote set-url origin "git@$host:${GITHUB_REPOSITORY}.git"
+          git config core.sshCommand "ssh -i $dir/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$dir/known_hosts"
+
+      - name: Merge upstream if green
+        env:
+          UPSTREAM_URL: https://github.com/petercv/ucr2-integration-dunehd.git
+          CHECK_CMD: tools/ci-check.sh
+          # public through the GitHub push mirror: ethw with a Claude trailer, like every
+          # fork commit (Public commit identity check)
+          GIT_NAME: ethw
+          GIT_EMAIL: 9457378+ethw@users.noreply.github.com
+          COMMIT_TRAILER: 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
+          # no upstream tags: fork versions continue upstream's numbering and could collide,
+          # and a tag on an upstream commit would run only its .github workflows
+          SYNC_TAGS: '0'
+        run: tools/upstream-sync.sh
+
+      - name: Remove the key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ssh"
+
+      - name: Open an issue on failure
+        if: failure()
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          api="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_NUMBER}"
+          auth="Authorization: token $TOKEN"
+          # one open issue at a time: later failures add a comment to it
+          open=$(curl -sf -H "$auth" "$api/issues?state=open&type=issues&q=Upstream%20sync%20failed" |
+                 python3 -c 'import json, sys; print(next((str(i["number"]) for i in json.load(sys.stdin) if i["title"] == "Upstream sync failed"), ""))')
+          if [ -n "$open" ]; then
+            python3 -c 'import json, sys; print(json.dumps({"body": "Failed again: " + sys.argv[1]}))' "$run_url" > c.json
+            curl -sf -X POST -H "$auth" -H 'Content-Type: application/json' -d @c.json "$api/issues/$open/comments" > /dev/null
+            exit 0
+          fi
+          queued=$(curl -sf -H "$auth" "$api/labels" |
+                   python3 -c 'import json, sys; print([l["id"] for l in json.load(sys.stdin) if l["name"] == "queued"])')
+          python3 - "$run_url" "$queued" > issue.json <<'PY'
+          import json, sys
+          print(json.dumps({
+              "title": "Upstream sync failed",
+              "labels": json.loads(sys.argv[2]),
+              "body": "The weekly upstream sync couldn't merge petercv/ucr2-integration-dunehd into main (merge "
+                      "conflict, rewritten history or a failing check). main is unchanged.\n\n"
+                      f"Run: {sys.argv[1]}\n\nResolve by hand: merge upstream on a PR branch, fix, and "
+                      "merge the PR; the next sync continues from there.",
+          }))
+          PY
+          curl -sf -X POST -H "$auth" -H 'Content-Type: application/json' -d @issue.json "$api/issues" > /dev/null
