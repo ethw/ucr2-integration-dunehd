@@ -8,6 +8,17 @@
 # Output: uc-intg-dunehd-v<version>-aarch64.tar.gz in the repository root.
 set -eu
 
+# `run_container` can exit 125 inside an LXC when removing the finished container fails
+# ("unable to remove filesystem"), even though the command in it succeeded. Run without --rm,
+# keep the command's exit code, and remove the container best-effort.
+run_container() {
+  name=ci-build-$$-$(date +%s%N)
+  rc=0
+  docker run --name "$name" "$@" || rc=$?
+  docker rm -f "$name" >/dev/null 2>&1 || true
+  return "$rc"
+}
+
 PY_IMAGE=docker.io/library/python:3.11-slim-bookworm@sha256:eb769d88622468aea09986df8172151981bf6622b5eec58dc38301e20673ff84
 # Official release used as the reference for bundled system libraries
 REF_URL=https://github.com/petercv/ucr2-integration-dunehd/releases/download/v0.2.2/uc-intg-dunehd-v0.2.2-aarch64.tar.gz
@@ -15,7 +26,7 @@ REF_SHA=c093ede359f3a0282413cdbae3af564d91f184873e8b4a12f5878eb6d3f51e0e
 CACHE=${BUILD_CACHE:-$HOME/.cache/dunebuild}
 mkdir -p "$CACHE/pip"
 
-docker run --rm -v "$CACHE/pip:/root/.cache/pip" -v "$PWD:/w" -w /w "$PY_IMAGE" \
+run_container -v "$CACHE/pip:/root/.cache/pip" -v "$PWD:/w" -w /w "$PY_IMAGE" \
   sh -c "pip install -q --root-user-action=ignore -r requirements.txt -r test-requirements.txt &&
          python -m pylint src &&
          python -m isort src/. --check &&
