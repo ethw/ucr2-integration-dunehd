@@ -63,8 +63,9 @@ fi
 echo "running checks: $CHECK_CMD"
 bash -c "$CHECK_CMD"
 
-git push origin "$new:refs/heads/upstream"
-git push origin upstream-sync:refs/heads/main
+# both or neither: an `upstream` that moved without main would make every later run report
+# "unchanged" and never retry the merge
+git push --atomic origin "$new:refs/heads/upstream" upstream-sync:refs/heads/main
 if [ "${SYNC_TAGS:-0}" = 1 ]; then
   git push --quiet origin 'refs/tags/v*:refs/tags/v*'
 fi
