@@ -21,16 +21,6 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Push access with the deploy key
-        env:
-          KEY: ${{ secrets.SYNC_DEPLOY_KEY }}
-        run: |
-          dir="$RUNNER_TEMP/ssh"; mkdir -p "$dir"; chmod 700 "$dir"
-          printf '%s\n' "$KEY" > "$dir/key"; chmod 600 "$dir/key"
-          host=$(echo "$GITHUB_SERVER_URL" | sed 's|^https\?://||; s|/.*||')
-          git remote set-url origin "git@$host:${GITHUB_REPOSITORY}.git"
-          git config core.sshCommand "ssh -i $dir/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$dir/known_hosts"
-
       - name: Merge upstream if green
         env:
           UPSTREAM_URL: https://github.com/petercv/ucr2-integration-dunehd.git
@@ -43,7 +33,28 @@ jobs:
           # no upstream tags: fork versions continue upstream's numbering and could collide,
           # and a tag on an upstream commit would run only its .github workflows
           SYNC_TAGS: '0'
+          SYNC_PUSH: '0'
+          SYNC_STATE: ${{ runner.temp }}/sync-state
         run: tools/upstream-sync.sh
+
+      # The key only exists after the checks, which run upstream's (untrusted) code.
+      - name: Push access with the deploy key
+        env:
+          KEY: ${{ secrets.SYNC_DEPLOY_KEY }}
+        run: |
+          dir="$RUNNER_TEMP/ssh"; mkdir -p "$dir"; chmod 700 "$dir"
+          printf '%s\n' "$KEY" > "$dir/key"; chmod 600 "$dir/key"
+          host=$(echo "$GITHUB_SERVER_URL" | sed 's|^https\?://||; s|/.*||')
+          git remote set-url origin "git@$host:${GITHUB_REPOSITORY}.git"
+          git config core.sshCommand "ssh -i $dir/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$dir/known_hosts"
+
+      - name: Push upstream and main (both or neither)
+        run: |
+          state="$RUNNER_TEMP/sync-state"
+          [ -f "$state" ] || { echo "nothing to push"; exit 0; }
+          . "$state"
+          git push --atomic origin "$UPSTREAM_SHA:refs/heads/upstream" "$MERGE_SHA:refs/heads/main"
+          echo "main updated to $MERGE_SHA"
 
       - name: Remove the key
         if: always()
