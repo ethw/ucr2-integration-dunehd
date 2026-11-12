@@ -1,7 +1,7 @@
 # Fork: weekly automatic merge of petercv/ucr2-integration-dunehd main.
 # Ethan, 2026-10-21: auto-merge when it merges cleanly and every check passes; otherwise an
 # issue is opened and main is left alone. Pushes with the repo's write deploy key (secret
-# SYNC_DEPLOY_KEY), the only non-`me` key allowed to push the protected main.
+# SYNC_DEPLOY_KEY_B64), the only non-`me` key allowed to push the protected main.
 name: Upstream sync
 
 on:
@@ -74,7 +74,11 @@ jobs:
     steps:
       - name: Push upstream and main (both or neither)
         env:
-          KEY: ${{ secrets.SYNC_DEPLOY_KEY }}
+          # base64 of the private key on one line: the runner prints step env and masks only
+          # single-line secrets, so a multi-line key appeared in the log in plain text
+          KEY: ${{ secrets.SYNC_DEPLOY_KEY_B64 }}
+          # Gitea SSH is Traefik's ssh entrypoint on the edge; :22 there is the edge LXC's sshd
+          SSH_PORT: '222'
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           UP: ${{ needs.sync.outputs.upstream_sha }}
           TESTED: ${{ needs.sync.outputs.merge_tree }}
@@ -83,7 +87,7 @@ jobs:
         run: |
           exec env -i PATH=/usr/bin:/bin LANG=C.UTF-8 HOME=/nonexistent \
             GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
-            KEY="$KEY" TOKEN="$TOKEN" UP="$UP" TESTED="$TESTED" UPSTREAM_URL="$UPSTREAM_URL" \
+            KEY="$KEY" SSH_PORT="$SSH_PORT" TOKEN="$TOKEN" UP="$UP" TESTED="$TESTED" UPSTREAM_URL="$UPSTREAM_URL" \
             COMMIT_TRAILER="$COMMIT_TRAILER" GIT_NAME="$GIT_NAME" GIT_EMAIL="$GIT_EMAIL" \
             SERVER="$GITHUB_SERVER_URL" REPO="$GITHUB_REPOSITORY" TMP="$RUNNER_TEMP" \
             /bin/bash --noprofile --norc -euo pipefail -c '
@@ -114,10 +118,12 @@ jobs:
 
           dir="$TMP/ssh"; rm -rf "$dir"; mkdir -m 700 "$dir"
           trap "rm -rf \"$dir\"" EXIT
-          printf "%s\n" "$KEY" > "$dir/key"; chmod 600 "$dir/key"
+          printf "%s" "$KEY" | base64 -d > "$dir/key" ||
+            { echo "::error::SYNC_DEPLOY_KEY_B64 is not valid base64"; exit 1; }
+          chmod 600 "$dir/key"
           host=${SERVER#*://}; host=${host%%/*}
           g -c core.sshCommand="ssh -F /dev/null -i $dir/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$dir/known_hosts" \
-            push --no-verify --atomic "git@$host:$REPO.git" \
+            push --no-verify --atomic "ssh://git@$host:$SSH_PORT/$REPO.git" \
             "$UP:refs/heads/upstream" "$merge:refs/heads/main"
           echo "main updated to $merge"'
 
